@@ -1,0 +1,220 @@
+---
+title: "Iteration and lists"
+author: "Wenjie Wu"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(rvest)
+```
+
+```{r}
+vec_numeric = 5:8
+vec_char = c("My", "name", "is", "Jeff")
+vec_logical = c(TRUE, TRUE, TRUE, FALSE)
+
+l = list(
+  vec_numeric = 5:8,
+  mat         = matrix(1:8, 2, 4),
+  vec_logical = c(TRUE, FALSE),
+  summary     = summary(rnorm(1000)))
+
+l
+
+l$mat
+
+l[["mat"]]
+```
+
+Make a list 
+
+```{r}
+list_norm = 
+  list(
+    a = rnorm(20, 0, 5),
+    b = rnorm(20, 4, 5),
+    c = rnorm(20, 0, 10),
+    d = rnorm(20, 4, 10)
+  )
+
+list_norm[["b"]]
+```
+
+```{r}
+mean_and_sd = function(x) {
+  
+  if (!is.numeric(x)) {
+    stop("Argument x should be numeric")
+  } else if (length(x) == 1) {
+    stop("Cannot be computed for length 1 vectors")
+  }
+  
+  mean_x = mean(x)
+  sd_x = sd(x)
+
+  out_df = 
+  tibble(
+    mean = mean_x, 
+    sd = sd_x
+  )
+  
+  return(out_df)
+}
+```
+
+```{r}
+mean_and_sd(list_norm[["a"]])
+mean_and_sd(list_norm[["b"]])
+mean_and_sd(list_norm[["c"]])
+mean_and_sd(list_norm[["d"]])
+```
+
+## Use a for loop
+
+```{r}
+output = vector("list", length = 4)
+
+for (i in 1:4) {
+  output[[i]] = mean_and_sd(list_norm[[i]])
+}
+```
+
+
+## `Map` do the same
+
+
+```{r}
+map(list_norm, mean_and_sd)
+
+output = 
+  map(list_norm, mean_and_sd) |>
+  bind_rows()
+
+output
+
+```
+
+## List columns
+
+```{r}
+listcol_df = 
+  tibble(
+    name = c("a", "b", "c", "d"),
+    samp = list_norm
+  )
+
+listcol_df
+
+listcol_df |>
+  filter(name %in% c("a", "b"))
+
+listcol_df |>
+  select(-samp)
+```
+
+```{r}
+listcol_df[["samp"]]
+
+listcol_df[["samp"]][["a"]]
+
+map(listcol_df[["samp"]], mean_and_sd)
+```
+
+Add a list column
+
+
+```{r}
+listcol_df |>
+  mutate(
+    output = map(samp, mean_and_sd) # `map` returns a list, `map_dbl` return dbl
+  )
+```
+
+
+## NSDUH
+
+```{r}
+nsduh_table_format = function(html, table_num) {
+  
+  out_table = html |>
+    html_table() |>
+    nth(table_num) |>
+    slice(-1) |>
+    select(-contains("P Value"))
+  
+    return(out_table)
+}
+```
+
+```{r}
+nsduh_url = "http://samhda.s3-us-gov-west-1.amazonaws.com/s3fs-public/field-uploads/2k15StateFiles/NSDUHsaeShortTermCHG2015.htm"
+
+nsduh_html = read_html(nsduh_url)
+
+```
+
+
+```{r}
+nsduh_table_format(html = nsduh_html, table_num = 1)
+nsduh_table_format(html = nsduh_html, table_num = 4)
+nsduh_table_format(html = nsduh_html, table_num = 5)
+```
+
+```{r}
+nsduh_df = 
+  tibble(
+    drug = c("marj", "cocaine", "herion"),
+    table_n = c(1, 4, 5)
+  ) |>
+  mutate(table = map(table_n, nsduh_table_format, html = nsduh_html)) |>
+  unnest(table)
+
+nsduh_df = 
+  tibble(
+    drug = c("marj", "cocaine", "herion"),
+    table_n = c(1, 4, 5)
+  ) |>
+  mutate(table = 
+           map(table_n, \(x)nsduh_table_format(html = nsduh_html, table_num = x))) |>
+  unnest(table)
+```
+
+## Weather data
+
+```{r}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728", "USW00022534", "USS0023B17S"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2021-01-01",
+    date_max = "2022-12-31") |>
+  mutate(
+    name = recode(
+      id, 
+      USW00094728 = "CentralPark_NY", 
+      USW00022534 = "Molokai_HI",
+      USS0023B17S = "Waterhole_WA"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) |>
+  select(name, id, everything())
+```
+
+```{r}
+weather_nest = 
+  weather_df |>
+  nest(data = date:tmin)
+```
+
+Regressing tmax in tmin
+
+```{r}
+lm(tmax ~ tmin, data = weather_nest[["data"]][[1]])
+```
+
+```{r}
+weather_nest |>
+  mutate(model_fit = map(data, \(x) lm(tmax ~ tmin, data = x))) |>
+  pull(model_fit)
+```
+
